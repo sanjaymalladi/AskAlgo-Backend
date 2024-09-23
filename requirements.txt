@@ -3,3 +3,4 @@ Flask-CORS
 gunicorn
 python-dotenv
 google-generativeai
+waitress
