@@ -6,7 +6,6 @@ import os
 
 # Load environment variables from .env file
 load_dotenv()
-
 # Initialize Flask app
 app = Flask(__name__)
 
@@ -21,7 +20,6 @@ if not GOOGLE_API_KEY:
 
 # Configure the Gemini API
 genai.configure(api_key=GOOGLE_API_KEY)
-
 # Function to get AI response
 def get_ai_response(user_input):
     prompt = f"You are a Socratic method AI tutor. Your job is to ask questions and guide students to learn data structures and algorithms. User asked: '{user_input}'. Respond with a question or guiding comment."
@@ -54,8 +52,3 @@ def ask():
 @app.route('/')
 def index():
     return "Welcome to the AI Teaching Assistant."
-
-if __name__ == '__main__':
-    # Instead of app.run(debug=True), use this:
-    from waitress import serve
-    serve(app, host="0.0.0.0", port=5000)
