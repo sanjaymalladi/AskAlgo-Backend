@@ -5,6 +5,7 @@ import firebase_admin
 from firebase_admin import credentials, auth as firebase_auth, db
 from uuid import uuid4
 from dotenv import load_dotenv
+import json
 
 load_dotenv()
 
