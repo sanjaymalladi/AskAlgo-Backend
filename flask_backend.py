@@ -85,12 +85,17 @@ def verify_token():
 @app.route('/ask', methods=['POST'])
 def ask():
     auth_header = request.headers.get('Authorization', '')
-    id_token_str = auth_header.split('Bearer ')[-1]
+    
+    if not auth_header.startswith('Bearer '):
+        return jsonify({"error": "Invalid Authorization header format"}), 401
 
+    id_token_str = auth_header.split('Bearer ')[-1]
+    
     if not id_token_str:
         return jsonify({"error": "Authorization token is missing"}), 401
 
     uid = verify_firebase_token(id_token_str)
+    
     if not uid:
         return jsonify({"error": "Invalid or expired token"}), 401
 
@@ -101,22 +106,36 @@ def ask():
     if not question:
         return jsonify({"error": "Question is required"}), 400
 
+    # Generate a new conversation ID if not provided
     if not conversation_id:
         conversation_id = str(uuid4())
 
+    # Get the reference for the user's conversation
     conversation_ref = db.reference(f'users/{uid}/conversations/{conversation_id}')
     
     try:
-        conversation_data = conversation_ref.get() or {"messages": []}
+        # Fetch conversation data
+        conversation_data = conversation_ref.get()
+        
+        # Handle case where no conversation exists yet
+        if conversation_data is None:
+            conversation_data = {"messages": []}
+        
+        # Add the user's question to the conversation history
         conversation_data["messages"].append({"role": "user", "content": question})
 
+        # Get AI response (dummy function, replace with actual AI logic)
         ai_response = get_ai_response(question, conversation_data["messages"])
         
+        # Add AI's response to the conversation history
         conversation_data["messages"].append({"role": "ai", "content": ai_response})
+
+        # Save the updated conversation data back to Firebase
         conversation_ref.set(conversation_data)
-        
+
         return jsonify({"response": ai_response, "conversationId": conversation_id}), 200
     except Exception as e:
+        print(f"Error: {str(e)}")
         return jsonify({"error": f"Failed to get AI response: {str(e)}"}), 500
 
 @app.route('/get_conversations', methods=['GET'])
