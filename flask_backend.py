@@ -34,28 +34,16 @@ def verify_firebase_token(id_token):
 def signin():
     data = request.json
     id_token = data.get('idToken')
-    email = data.get('email')
-    password = data.get('password')
 
     if id_token:
-        # Handle OAuth sign-in
         uid = verify_firebase_token(id_token)
         if uid:
             user = firebase_auth.get_user(uid)
             return jsonify({"uid": uid, "email": user.email}), 200
         else:
             return jsonify({"error": "Invalid ID token"}), 401
-    elif email and password:
-        # Handle email/password sign-in
-        try:
-            # Note: Firebase Admin SDK does not support email/password sign-in.
-            # Typically, email/password sign-in is handled on the frontend.
-            # For demonstration, we will assume the frontend sends the ID token after signing in.
-            return jsonify({"error": "Email/password sign-in is not supported via Admin SDK"}), 400
-        except Exception as e:
-            return jsonify({"error": str(e)}), 500
     else:
-        return jsonify({"error": "Invalid request parameters"}), 400
+        return jsonify({"error": "ID token is required"}), 400
 
 # Route: Register (email/password registration)
 @app.route('/register', methods=['POST'])
