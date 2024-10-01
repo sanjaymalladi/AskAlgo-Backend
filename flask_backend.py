@@ -9,18 +9,27 @@ from uuid import uuid4
 app = Flask(__name__)
 CORS(app, resources={r"/*": {"origins": "https://askalgo.vercel.app"}})
 
-# Initialize Firebase Admin SDK
-cred = credentials.Certificate('google-service-account.json')
-firebase_admin.initialize_app(cred, {
-    'databaseURL': 'https://askalgo-6ed80-default-rtdb.asia-southeast1.firebasedatabase.app/'
-})
+# Initialize Firebase Admin SDK only if not already initialized
+if not firebase_admin._apps:
+    try:
+        cred_path = os.getenv('GOOGLE_APPLICATION_CREDENTIALS', 'google-service-account.json')
+        cred = credentials.Certificate(cred_path)
+        firebase_admin.initialize_app(cred, {
+            'databaseURL': 'https://askalgo-6ed80-default-rtdb.asia-southeast1.firebasedatabase.app/'
+        })
+    except Exception as e:
+        print(f"Failed to initialize Firebase Admin SDK: {str(e)}")
+        raise
 
 def verify_firebase_token(id_token_str):
     try:
         decoded_token = firebase_auth.verify_id_token(id_token_str)
         return decoded_token['uid']
-    except firebase_admin.auth.InvalidIdTokenError:
+    except firebase_auth.InvalidIdTokenError:
         print("Invalid ID token")
+        return None
+    except firebase_auth.ExpiredIdTokenError:
+        print("Expired ID token")
         return None
     except Exception as e:
         print(f"Error verifying token: {str(e)}")
