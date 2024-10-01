@@ -12,7 +12,7 @@ from uuid import uuid4
 app = Flask(__name__)
 
 # Configure CORS to allow requests from your frontend origin
-CORS(app, resources={r"/*": {"origins": "http://localhost:3000"}})  # Adjust origin as needed
+CORS(app, resources={r"/*": {"origins": "https://askalgo.vercel.app"}})  # Adjust origin as needed
 
 # Initialize Firebase Admin SDK
 cred = credentials.Certificate('google-service-account.json')  # Ensure this file is in the same directory
