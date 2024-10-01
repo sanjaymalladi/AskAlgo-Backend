@@ -10,7 +10,7 @@ app = Flask(__name__)
 CORS(app, resources={r"/*": {"origins": "https://askalgo.vercel.app"}})
 
 # Initialize Firebase Admin SDK
-cred = credentials.Certificate('google-services-account.json')
+cred = credentials.Certificate('google-service-account.json')
 firebase_admin.initialize_app(cred, {
     'databaseURL': 'https://askalgo-6ed80-default-rtdb.asia-southeast1.firebasedatabase.app/'
 })
