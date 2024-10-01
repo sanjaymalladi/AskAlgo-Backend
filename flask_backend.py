@@ -7,45 +7,56 @@ from firebase_admin import credentials, auth as firebase_auth, db
 import os
 import time
 from uuid import uuid4
+from google.auth.transport import requests
+from google.oauth2 import id_token
 
 # Initialize Flask app
 app = Flask(__name__)
 
 # Configure CORS to allow requests from your frontend origin
-CORS(app, resources={r"/*": {"origins": "https://askalgo.vercel.app"}})  # Adjust origin as needed
+CORS(app, resources={r"/*": {"origins": "https://askalgo.vercel.app"}})
 
 # Initialize Firebase Admin SDK
-cred = credentials.Certificate('google-service-account.json')  # Ensure this file is in the same directory
+cred = credentials.Certificate('google-service-account.json')
 firebase_admin.initialize_app(cred, {
-    'databaseURL': 'https://askalgo-6ed80-default-rtdb.asia-southeast1.firebasedatabase.app/'  # Replace with your actual databaseURL
+    'databaseURL': 'https://askalgo-6ed80-default-rtdb.asia-southeast1.firebasedatabase.app/'
 })
 
 # Helper function to verify Firebase ID Token
-def verify_firebase_token(id_token):
+def verify_firebase_token(id_token_str):
     try:
-        decoded_token = firebase_auth.verify_id_token(id_token)
-        return decoded_token['uid']
-    except firebase_admin.exceptions.FirebaseError as e:
-        print(f"Firebase token verification failed: {e}")
+        # Use google-auth library to verify the token
+        request = requests.Request()
+        id_info = id_token.verify_oauth2_token(id_token_str, request, audience=None)
+        
+        if id_info['iss'] not in ['https://securetoken.google.com/YOUR_PROJECT_ID', 'accounts.google.com']:
+            raise ValueError('Wrong issuer.')
+        
+        # ID token is valid. Get the user's UID from the decoded token.
+        uid = id_info['sub']
+        return uid
+    except ValueError as e:
+        print(f"Token verification failed: {e}")
         return None
 
-# Route: Sign in (handles both email/password and OAuth sign-ins)
 @app.route('/signin', methods=['POST'])
 def signin():
     data = request.json
-    id_token = data.get('idToken')
+    id_token_str = data.get('idToken')
 
-    if id_token:
-        uid = verify_firebase_token(id_token)
+    if id_token_str:
+        uid = verify_firebase_token(id_token_str)
         if uid:
-            user = firebase_auth.get_user(uid)
-            return jsonify({"uid": uid, "email": user.email}), 200
+            try:
+                user = firebase_auth.get_user(uid)
+                return jsonify({"uid": uid, "email": user.email}), 200
+            except firebase_admin.exceptions.FirebaseError as e:
+                return jsonify({"error": f"Firebase error: {str(e)}"}), 500
         else:
             return jsonify({"error": "Invalid ID token"}), 401
     else:
         return jsonify({"error": "ID token is required"}), 400
 
-# Route: Register (email/password registration)
 @app.route('/register', methods=['POST'])
 def register():
     data = request.json
@@ -64,34 +75,35 @@ def register():
         )
         return jsonify({"uid": user.uid, "email": user.email}), 201
     except firebase_admin.exceptions.FirebaseError as e:
-        return jsonify({"error": str(e)}), 400
+        return jsonify({"error": f"Firebase error: {str(e)}"}), 400
 
-# Route: Verify Token (for token-based authentication)
 @app.route('/verify_token', methods=['POST'])
 def verify_token():
     data = request.json
-    id_token = data.get('idToken')
+    id_token_str = data.get('idToken')
 
-    if not id_token:
+    if not id_token_str:
         return jsonify({"error": "ID token is required"}), 400
 
-    uid = verify_firebase_token(id_token)
+    uid = verify_firebase_token(id_token_str)
     if uid:
-        user = firebase_auth.get_user(uid)
-        return jsonify({"uid": uid, "email": user.email}), 200
+        try:
+            user = firebase_auth.get_user(uid)
+            return jsonify({"uid": uid, "email": user.email}), 200
+        except firebase_admin.exceptions.FirebaseError as e:
+            return jsonify({"error": f"Firebase error: {str(e)}"}), 500
     else:
         return jsonify({"error": "Invalid ID token"}), 401
 
-# Route: Ask (handle AI chat)
 @app.route('/ask', methods=['POST'])
 def ask():
     auth_header = request.headers.get('Authorization', '')
-    id_token = auth_header.split('Bearer ')[-1]
+    id_token_str = auth_header.split('Bearer ')[-1]
 
-    if not id_token:
+    if not id_token_str:
         return jsonify({"error": "Authorization token is missing"}), 401
 
-    uid = verify_firebase_token(id_token)
+    uid = verify_firebase_token(id_token_str)
     if not uid:
         return jsonify({"error": "Invalid or expired token"}), 401
 
@@ -111,27 +123,24 @@ def ask():
         conversation_data = conversation_ref.get() or {"messages": []}
         conversation_data["messages"].append({"role": "user", "content": question})
 
-        # TODO: Integrate with AI service (e.g., OpenAI, Google GenAI)
         ai_response = get_ai_response(question, conversation_data["messages"])
-        time.sleep(1)  # Simulate AI processing time
         
         conversation_data["messages"].append({"role": "ai", "content": ai_response})
         conversation_ref.set(conversation_data)
         
         return jsonify({"response": ai_response, "conversationId": conversation_id}), 200
     except Exception as e:
-        return jsonify({"error": str(e)}), 500
+        return jsonify({"error": f"Failed to get AI response: {str(e)}"}), 500
 
-# Route: Get Conversations (retrieve user's past conversations)
 @app.route('/get_conversations', methods=['GET'])
 def get_conversations():
     auth_header = request.headers.get('Authorization', '')
-    id_token = auth_header.split('Bearer ')[-1]
+    id_token_str = auth_header.split('Bearer ')[-1]
 
-    if not id_token:
+    if not id_token_str:
         return jsonify({"error": "Authorization token is missing"}), 401
 
-    uid = verify_firebase_token(id_token)
+    uid = verify_firebase_token(id_token_str)
     if not uid:
         return jsonify({"error": "Invalid or expired token"}), 401
 
@@ -140,15 +149,12 @@ def get_conversations():
         conversations = conversations_ref.get()
         return jsonify(conversations), 200
     except Exception as e:
-        return jsonify({"error": str(e)}), 500
+        return jsonify({"error": f"Failed to retrieve conversations: {str(e)}"}), 500
 
-# Placeholder function for AI response generation
 def get_ai_response(user_input, conversation_history):
-    # Implement your AI response logic here
-    # For demonstration, we'll return a simple echo response
+    # TODO: Implement your AI response logic here
+    # For now, we'll return a simple response
     return f"AI response to: {user_input}"
 
-# Run the Flask app
 if __name__ == '__main__':
-    # For development purposes only. Use Gunicorn or another WSGI server in production.
     app.run(debug=True)
