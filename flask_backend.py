@@ -142,11 +142,9 @@ def ask():
         return jsonify({"error": f"Failed to get AI response: {str(e)}"}), 500
 
 def get_ai_response(user_input, context=None):
-    # Construct the prompt with previous context if available
-    context_text = f"Context: {context if context else 'No prior context available.'}\n\n"
     prompt = f"""You are an advanced AI tutor specializing in data structures and algorithms. Your primary method is the Socratic approach, but you're also adaptive to the student's needs. Your goal is to guide students towards understanding and critical thinking.
 
-    {context_text}
+    Context: {context if context else 'No prior context available.'}
 
     User's latest input: '{user_input}'
 
@@ -176,6 +174,7 @@ def get_ai_response(user_input, context=None):
     except Exception as e:
         logging.error(f"Error generating AI response: {str(e)}")
         return "I'm sorry, but I couldn't process your request at the moment."
+
 
 
 # Other routes (signin, register, verify_token, get_conversations)
