@@ -1,42 +1,29 @@
-# app.py
 import json
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 import firebase_admin
 from firebase_admin import credentials, auth as firebase_auth, db
 import os
-import time
 from uuid import uuid4
-from google.auth.transport import requests
-from google.oauth2 import id_token
 
-# Initialize Flask app
 app = Flask(__name__)
-
-# Configure CORS to allow requests from your frontend origin
 CORS(app, resources={r"/*": {"origins": "https://askalgo.vercel.app"}})
 
 # Initialize Firebase Admin SDK
-cred = credentials.Certificate('google-service-account.json')
+cred = credentials.Certificate('google-services-account.json')
 firebase_admin.initialize_app(cred, {
     'databaseURL': 'https://askalgo-6ed80-default-rtdb.asia-southeast1.firebasedatabase.app/'
 })
 
-# Helper function to verify Firebase ID Token
 def verify_firebase_token(id_token_str):
     try:
-        # Use google-auth library to verify the token
-        request = requests.Request()
-        id_info = id_token.verify_oauth2_token(id_token_str, request, audience=None)
-        
-        if id_info['iss'] not in ['https://securetoken.google.com/askalgo-6ed80', 'accounts.google.com']:
-            raise ValueError('Wrong issuer.')
-        
-        # ID token is valid. Get the user's UID from the decoded token.
-        uid = id_info['sub']
-        return uid
-    except ValueError as e:
-        print(f"Token verification failed: {e}")
+        decoded_token = firebase_auth.verify_id_token(id_token_str)
+        return decoded_token['uid']
+    except firebase_admin.auth.InvalidIdTokenError:
+        print("Invalid ID token")
+        return None
+    except Exception as e:
+        print(f"Error verifying token: {str(e)}")
         return None
 
 @app.route('/signin', methods=['POST'])
@@ -44,18 +31,18 @@ def signin():
     data = request.json
     id_token_str = data.get('idToken')
 
-    if id_token_str:
-        uid = verify_firebase_token(id_token_str)
-        if uid:
-            try:
-                user = firebase_auth.get_user(uid)
-                return jsonify({"uid": uid, "email": user.email}), 200
-            except firebase_admin.exceptions.FirebaseError as e:
-                return jsonify({"error": f"Firebase error: {str(e)}"}), 500
-        else:
-            return jsonify({"error": "Invalid ID token"}), 401
-    else:
+    if not id_token_str:
         return jsonify({"error": "ID token is required"}), 400
+
+    uid = verify_firebase_token(id_token_str)
+    if not uid:
+        return jsonify({"error": "Invalid ID token"}), 401
+
+    try:
+        user = firebase_auth.get_user(uid)
+        return jsonify({"uid": uid, "email": user.email}), 200
+    except firebase_admin.exceptions.FirebaseError as e:
+        return jsonify({"error": f"Firebase error: {str(e)}"}), 500
 
 @app.route('/register', methods=['POST'])
 def register():
