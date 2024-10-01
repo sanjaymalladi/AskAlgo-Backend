@@ -18,9 +18,17 @@ logging.basicConfig(level=logging.INFO)
 app = Flask(__name__)
 CORS(app, resources={r"/*": {"origins": "https://askalgo.vercel.app"}})
 
+# Verify GEMINI_API_KEY is set
+gemini_api_key = os.getenv('GEMINI_API_KEY')
+if not gemini_api_key:
+    logging.error("GEMINI_API_KEY is not set. Please check your .env file.")
+    raise EnvironmentError("GEMINI_API_KEY is not set.")
+else:
+    logging.info("GEMINI_API_KEY is set.")
+
 # Configure Gemini API once at startup
 try:
-    genai.configure(api_key=os.getenv('GEMINI_API_KEY'))
+    genai.configure(api_key=gemini_api_key)
     logging.info("Gemini API configured successfully")
 except Exception as e:
     logging.error(f"Failed to configure Gemini API: {str(e)}")
@@ -74,16 +82,19 @@ def ask():
     auth_header = request.headers.get('Authorization', '')
     
     if not auth_header.startswith('Bearer '):
+        logging.warning("Invalid Authorization header format")
         return jsonify({"error": "Invalid Authorization header format"}), 401
 
     id_token_str = auth_header.split('Bearer ')[-1]
     
     if not id_token_str:
+        logging.warning("Authorization token is missing")
         return jsonify({"error": "Authorization token is missing"}), 401
 
     uid = verify_firebase_token(id_token_str)
     
     if not uid:
+        logging.warning("Invalid or expired token")
         return jsonify({"error": "Invalid or expired token"}), 401
 
     data = request.json
@@ -91,6 +102,7 @@ def ask():
     conversation_id = data.get('conversationId')
 
     if not question:
+        logging.warning("Question is required")
         return jsonify({"error": "Question is required"}), 400
 
     # Generate a new conversation ID if not provided
@@ -123,32 +135,17 @@ def ask():
         # Save the updated conversation data back to Firebase
         conversation_ref.set(conversation_data)
 
+        logging.info(f"AI response generated for user {uid} in conversation {conversation_id}")
         return jsonify({"response": ai_response, "conversationId": conversation_id}), 200
     except Exception as e:
-        logging.error(f"Error: {str(e)}")
+        logging.error(f"Error in /ask endpoint: {str(e)}")
         return jsonify({"error": f"Failed to get AI response: {str(e)}"}), 500
 
 def get_ai_response(user_input, context=None):
-    prompt = f"""You are an advanced AI tutor specializing in data structures and algorithms. Your primary method is the Socratic approach, but you're also adaptive to the student's needs. Your goal is to guide students towards understanding and critical thinking.
-
-Context: {context if context else 'No prior context available.'}
-
-User's latest input: '{user_input}'
-
-Follow these guidelines in your response:
-1. Briefly acknowledge the user's input.
-2. Ask a thought-provoking question related to the topic.
-3. If appropriate, provide a real-world analogy to illustrate the concept.
-4. Offer a hint or guiding statement to nudge the student in the right direction.
-5. If the student seems stuck, break down the problem into smaller steps.
-6. Encourage thinking about edge cases or potential issues.
-7. If the student has progressed, challenge them with a more advanced question.
-8. Maintain a supportive and encouraging tone.
-9. If relevant, suggest a small coding exercise to reinforce the concept.
-10. End with an open-ended question to continue the dialogue.
-
-Limit your response to 3-4 sentences, focusing on the most relevant points based on the user's input and context.
-"""
+    # Simplify prompt for debugging
+    # For production, you might want to use the detailed prompt as before
+    prompt = f"User: {user_input}\nAI:"
+    
     try:
         logging.info("Generating AI response using Gemini API")
         # Initialize the Gemini Generative Model
@@ -169,9 +166,11 @@ def signin():
     uid = verify_firebase_token(id_token_str)
     
     if not uid:
+        logging.warning("Signin failed: Invalid or expired token")
         return jsonify({"error": "Invalid or expired token"}), 401
     
     # Additional signin logic can be added here
+    logging.info(f"User {uid} signed in successfully")
     return jsonify({"message": "Signin successful"}), 200
 
 @app.route('/register', methods=['POST'])
@@ -181,6 +180,7 @@ def register():
     
     try:
         user = firebase_auth.create_user(email=email, password=password)
+        logging.info(f"User created successfully: {user.uid}")
         return jsonify({"message": "User created successfully", "uid": user.uid}), 201
     except Exception as e:
         logging.error(f"Error creating user: {str(e)}")
@@ -192,8 +192,10 @@ def verify_token():
     uid = verify_firebase_token(id_token_str)
     
     if not uid:
+        logging.warning("Token verification failed: Invalid or expired token")
         return jsonify({"error": "Invalid or expired token"}), 401
     
+    logging.info(f"Token verified successfully for user {uid}")
     return jsonify({"message": "Token verified successfully", "uid": uid}), 200
 
 @app.route('/get_conversations', methods=['GET'])
@@ -201,16 +203,19 @@ def get_conversations():
     auth_header = request.headers.get('Authorization', '')
     
     if not auth_header.startswith('Bearer '):
+        logging.warning("Invalid Authorization header format for get_conversations")
         return jsonify({"error": "Invalid Authorization header format"}), 401
 
     id_token_str = auth_header.split('Bearer ')[-1]
     
     if not id_token_str:
+        logging.warning("Authorization token is missing for get_conversations")
         return jsonify({"error": "Authorization token is missing"}), 401
 
     uid = verify_firebase_token(id_token_str)
     
     if not uid:
+        logging.warning("Invalid or expired token for get_conversations")
         return jsonify({"error": "Invalid or expired token"}), 401
 
     try:
@@ -218,11 +223,13 @@ def get_conversations():
         conversations_data = conversations_ref.get()
         
         if conversations_data is None:
+            logging.info(f"No conversations found for user {uid}")
             return jsonify({"message": "No conversations found"}), 200
         
+        logging.info(f"Conversations fetched for user {uid}")
         return jsonify(conversations_data), 200
     except Exception as e:
-        logging.error(f"Error fetching conversations: {str(e)}")
+        logging.error(f"Error fetching conversations for user {uid}: {str(e)}")
         return jsonify({"error": "Failed to fetch conversations"}), 500
 
 if __name__ == '__main__':
