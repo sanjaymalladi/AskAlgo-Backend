@@ -12,7 +12,7 @@ CORS(app, resources={r"/*": {"origins": "https://askalgo.vercel.app"}})
 # Initialize Firebase Admin SDK only if not already initialized
 if not firebase_admin._apps:
     try:
-        cred_path = os.getenv('GOOGLE_APPLICATION_CREDENTIALS', 'google-service-account.json')
+        cred_path = os.getenv('GOOGLE_APPLICATION_CREDENTIALS', './google-service-account.json')
         cred = credentials.Certificate(cred_path)
         firebase_admin.initialize_app(cred, {
             'databaseURL': 'https://askalgo-6ed80-default-rtdb.asia-southeast1.firebasedatabase.app/'
