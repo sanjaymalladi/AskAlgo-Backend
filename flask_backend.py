@@ -5,7 +5,11 @@ from flask_cors import CORS
 import firebase_admin
 from firebase_admin import credentials, auth as firebase_auth, db
 from uuid import uuid4
+from dotenv import load_dotenv
 import logging
+
+# Load environment variables from .env file
+load_dotenv()
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -17,7 +21,7 @@ CORS(app, resources={r"/*": {"origins": "https://askalgo.vercel.app"}})
 # Verify GEMINI_API_KEY is set
 gemini_api_key = os.getenv('GEMINI_API_KEY')
 if not gemini_api_key:
-    logging.error("GEMINI_API_KEY is not set.")
+    logging.error("GEMINI_API_KEY is not set. Please check your .env file.")
     raise EnvironmentError("GEMINI_API_KEY is not set.")
 else:
     logging.info("GEMINI_API_KEY is set.")
@@ -63,8 +67,14 @@ def verify_firebase_token(id_token_str):
     try:
         decoded_token = firebase_auth.verify_id_token(id_token_str)
         return decoded_token['uid']
+    except firebase_admin.auth.InvalidIdTokenError:
+        logging.warning("Invalid ID token")
+        return None
+    except firebase_admin.auth.ExpiredIdTokenError:
+        logging.warning("Expired ID token")
+        return None
     except Exception as e:
-        logging.error(f"Error during token verification: {str(e)}")
+        logging.error(f"Unexpected error during token verification: {str(e)}")
         return None
 
 @app.route('/ask', methods=['POST'])
@@ -175,6 +185,7 @@ def signin():
         logging.warning("Signin failed: Invalid or expired token")
         return jsonify({"error": "Invalid or expired token"}), 401
     
+    # Additional signin logic can be added here
     logging.info(f"User {uid} signed in successfully")
     return jsonify({"message": "Signin successful"}), 200
 
@@ -238,4 +249,4 @@ def get_conversations():
         return jsonify({"error": "Failed to fetch conversations"}), 500
 
 if __name__ == '__main__':
-    app.run(debug=False)
+    app.run(debug=True)
