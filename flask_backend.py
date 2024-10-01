@@ -5,11 +5,7 @@ from flask_cors import CORS
 import firebase_admin
 from firebase_admin import credentials, auth as firebase_auth, db
 from uuid import uuid4
-from dotenv import load_dotenv
 import logging
-
-# Load environment variables from .env file
-load_dotenv()
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -21,7 +17,7 @@ CORS(app, resources={r"/*": {"origins": "https://askalgo.vercel.app"}})
 # Verify GEMINI_API_KEY is set
 gemini_api_key = os.getenv('GEMINI_API_KEY')
 if not gemini_api_key:
-    logging.error("GEMINI_API_KEY is not set. Please check your .env file.")
+    logging.error("GEMINI_API_KEY is not set.")
     raise EnvironmentError("GEMINI_API_KEY is not set.")
 else:
     logging.info("GEMINI_API_KEY is set.")
@@ -67,14 +63,8 @@ def verify_firebase_token(id_token_str):
     try:
         decoded_token = firebase_auth.verify_id_token(id_token_str)
         return decoded_token['uid']
-    except firebase_admin.auth.InvalidIdTokenError:
-        logging.warning("Invalid ID token")
-        return None
-    except firebase_admin.auth.ExpiredIdTokenError:
-        logging.warning("Expired ID token")
-        return None
     except Exception as e:
-        logging.error(f"Unexpected error during token verification: {str(e)}")
+        logging.error(f"Error during token verification: {str(e)}")
         return None
 
 @app.route('/ask', methods=['POST'])
@@ -142,10 +132,26 @@ def ask():
         return jsonify({"error": f"Failed to get AI response: {str(e)}"}), 500
 
 def get_ai_response(user_input, context=None):
-    # Simplify prompt for debugging
-    # For production, you might want to use the detailed prompt as before
-    prompt = f"User: {user_input}\nAI:"
-    
+    prompt = f"""You are an advanced AI tutor specializing in data structures and algorithms. Your primary method is the Socratic approach, but you're also adaptive to the student's needs. Your goal is to guide students towards understanding and critical thinking.
+
+Context: {context if context else 'No prior context available.'}
+
+User's latest input: '{user_input}'
+
+Follow these guidelines in your response:
+1. Briefly acknowledge the user's input.
+2. Ask a thought-provoking question related to the topic.
+3. If appropriate, provide a real-world analogy to illustrate the concept.
+4. Offer a hint or guiding statement to nudge the student in the right direction.
+5. If the student seems stuck, break down the problem into smaller steps.
+6. Encourage thinking about edge cases or potential issues.
+7. If the student has progressed, challenge them with a more advanced question.
+8. Maintain a supportive and encouraging tone.
+9. If relevant, suggest a small coding exercise to reinforce the concept.
+10. End with an open-ended question to continue the dialogue.
+
+Limit your response to 3-4 sentences, focusing on the most relevant points based on the user's input and context.
+"""
     try:
         logging.info("Generating AI response using Gemini API")
         # Initialize the Gemini Generative Model
@@ -169,7 +175,6 @@ def signin():
         logging.warning("Signin failed: Invalid or expired token")
         return jsonify({"error": "Invalid or expired token"}), 401
     
-    # Additional signin logic can be added here
     logging.info(f"User {uid} signed in successfully")
     return jsonify({"message": "Signin successful"}), 200
 
@@ -233,4 +238,4 @@ def get_conversations():
         return jsonify({"error": "Failed to fetch conversations"}), 500
 
 if __name__ == '__main__':
-    app.run(debug=True)
+    app.run(debug=False)
