@@ -6,11 +6,16 @@ from firebase_admin import credentials, auth as firebase_auth, db
 from uuid import uuid4
 from dotenv import load_dotenv
 import json
+import genai  # Import the Gemini SDK (replace with the correct module name)
+import logging
 
 load_dotenv()
 
 app = Flask(__name__)
 CORS(app, resources={r"/*": {"origins": "https://askalgo.vercel.app"}})
+
+# Configure logging
+logging.basicConfig(level=logging.INFO)
 
 # Initialize Firebase Admin SDK
 def init_firebase():
@@ -34,9 +39,9 @@ def init_firebase():
             'databaseURL': os.getenv('FIREBASE_DATABASE_URL')
         })
         
-        print("Firebase Admin SDK initialized successfully")
+        logging.info("Firebase Admin SDK initialized successfully")
     except Exception as e:
-        print(f"Failed to initialize Firebase Admin SDK: {str(e)}")
+        logging.error(f"Failed to initialize Firebase Admin SDK: {str(e)}")
         raise
 
 init_firebase()
@@ -46,13 +51,13 @@ def verify_firebase_token(id_token_str):
         decoded_token = firebase_auth.verify_id_token(id_token_str)
         return decoded_token['uid']
     except firebase_admin.auth.InvalidIdTokenError:
-        print("Invalid ID token")
+        logging.warning("Invalid ID token")
         return None
     except firebase_admin.auth.ExpiredIdTokenError:
-        print("Expired ID token")
+        logging.warning("Expired ID token")
         return None
     except Exception as e:
-        print(f"Unexpected error during token verification: {str(e)}")
+        logging.error(f"Unexpected error during token verification: {str(e)}")
         return None
 
 @app.route('/ask', methods=['POST'])
@@ -97,8 +102,11 @@ def ask():
         # Add the user's question to the conversation history
         conversation_data["messages"].append({"role": "user", "content": question})
 
-        # Get AI response (dummy function, replace with actual AI logic)
-        ai_response = get_ai_response(question, conversation_data["messages"])
+        # Extract context from conversation history
+        context = "\n".join([f"{msg['role']}: {msg['content']}" for msg in conversation_data["messages"]])
+
+        # Get AI response
+        ai_response = get_ai_response(question, context)
         
         # Add AI's response to the conversation history
         conversation_data["messages"].append({"role": "ai", "content": ai_response})
@@ -108,13 +116,41 @@ def ask():
 
         return jsonify({"response": ai_response, "conversationId": conversation_id}), 200
     except Exception as e:
-        print(f"Error: {str(e)}")
+        logging.error(f"Error: {str(e)}")
         return jsonify({"error": f"Failed to get AI response: {str(e)}"}), 500
 
-def get_ai_response(user_input, conversation_history):
-    # TODO: Implement your AI response logic here
-    # For now, we'll return a simple response
-    return f"AI response to: {user_input}"
+def get_ai_response(user_input, context=None):
+    prompt = f"""You are an advanced AI tutor specializing in data structures and algorithms. Your primary method is the Socratic approach, but you're also adaptive to the student's needs. Your goal is to guide students towards understanding and critical thinking.
+
+Context: {context if context else 'No prior context available.'}
+
+User's latest input: '{user_input}'
+
+Follow these guidelines in your response:
+1. Briefly acknowledge the user's input.
+2. Ask a thought-provoking question related to the topic.
+3. If appropriate, provide a real-world analogy to illustrate the concept.
+4. Offer a hint or guiding statement to nudge the student in the right direction.
+5. If the student seems stuck, break down the problem into smaller steps.
+6. Encourage thinking about edge cases or potential issues.
+7. If the student has progressed, challenge them with a more advanced question.
+8. Maintain a supportive and encouraging tone.
+9. If relevant, suggest a small coding exercise to reinforce the concept.
+10. End with an open-ended question to continue the dialogue.
+
+Limit your response to 3-4 sentences, focusing on the most relevant points based on the user's input and context.
+"""
+    try:
+        # Initialize the Gemini Generative Model
+        model = genai.GenerativeModel('gemini-1.5-pro-exp-0827', api_key=os.getenv('GEMINI_API_KEY'))
+        
+        # Generate content using the prompt
+        response = model.generate_content(prompt)
+        
+        return response.text.strip()
+    except Exception as e:
+        logging.error(f"Error generating AI response: {str(e)}")
+        return "I'm sorry, but I couldn't process your request at the moment."
 
 # Other routes (signin, register, verify_token, get_conversations)
 @app.route('/signin', methods=['POST'])
@@ -137,7 +173,7 @@ def register():
         user = firebase_auth.create_user(email=email, password=password)
         return jsonify({"message": "User created successfully", "uid": user.uid}), 201
     except Exception as e:
-        print(f"Error creating user: {str(e)}")
+        logging.error(f"Error creating user: {str(e)}")
         return jsonify({"error": "Failed to create user"}), 500
 
 @app.route('/verify_token', methods=['POST'])
@@ -176,7 +212,7 @@ def get_conversations():
         
         return jsonify(conversations_data), 200
     except Exception as e:
-        print(f"Error fetching conversations: {str(e)}")
+        logging.error(f"Error fetching conversations: {str(e)}")
         return jsonify({"error": "Failed to fetch conversations"}), 500
 
 if __name__ == '__main__':
