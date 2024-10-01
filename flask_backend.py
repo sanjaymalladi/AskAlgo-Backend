@@ -1,21 +1,30 @@
 import os
+import google.generativeai as genai  # Updated import for Gemini SDK
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 import firebase_admin
 from firebase_admin import credentials, auth as firebase_auth, db
 from uuid import uuid4
 from dotenv import load_dotenv
-import json
-import genai  # Import the Gemini SDK (replace with the correct module name)
 import logging
 
+# Load environment variables from .env file
 load_dotenv()
-
-app = Flask(__name__)
-CORS(app, resources={r"/*": {"origins": "https://askalgo.vercel.app"}})
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
+
+# Initialize Flask app
+app = Flask(__name__)
+CORS(app, resources={r"/*": {"origins": "https://askalgo.vercel.app"}})
+
+# Configure Gemini API once at startup
+try:
+    genai.configure(api_key=os.getenv('GEMINI_API_KEY'))
+    logging.info("Gemini API configured successfully")
+except Exception as e:
+    logging.error(f"Failed to configure Gemini API: {str(e)}")
+    raise
 
 # Initialize Firebase Admin SDK
 def init_firebase():
@@ -141,12 +150,13 @@ Follow these guidelines in your response:
 Limit your response to 3-4 sentences, focusing on the most relevant points based on the user's input and context.
 """
     try:
+        logging.info("Generating AI response using Gemini API")
         # Initialize the Gemini Generative Model
-        model = genai.GenerativeModel('gemini-1.5-pro-exp-0827', api_key=os.getenv('GEMINI_API_KEY'))
+        model = genai.GenerativeModel('gemini-1.5-pro-exp-0827')
         
         # Generate content using the prompt
         response = model.generate_content(prompt)
-        
+        logging.info(f"Received response from Gemini: {response.text}")
         return response.text.strip()
     except Exception as e:
         logging.error(f"Error generating AI response: {str(e)}")
