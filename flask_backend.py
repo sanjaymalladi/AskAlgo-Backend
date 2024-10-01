@@ -109,21 +109,48 @@ def ask():
 
     data = request.json
     question = data.get('question')
+    conversation_id = data.get('conversationId')
 
     if not question:
         return jsonify({"error": "Question is required"}), 400
 
-    conversation_id = str(uuid4())
-    conversation_ref = db.reference(f'users/{uid}/conversations/{conversation_id}')
-    conversation_data = {"messages": [{"role": "user", "content": question}]}
+    if not conversation_id:
+        conversation_id = str(uuid4())
 
+    conversation_ref = db.reference(f'users/{uid}/conversations/{conversation_id}')
+    
     try:
+        conversation_data = conversation_ref.get() or {"messages": []}
+        conversation_data["messages"].append({"role": "user", "content": question})
+
         # TODO: Integrate with AI service (e.g., OpenAI, Google GenAI)
         ai_response = get_ai_response(question, conversation_data["messages"])
         time.sleep(1)  # Simulate AI processing time
+        
         conversation_data["messages"].append({"role": "ai", "content": ai_response})
         conversation_ref.set(conversation_data)
+        
         return jsonify({"response": ai_response, "conversationId": conversation_id}), 200
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+# Route: Get Conversations (retrieve user's past conversations)
+@app.route('/get_conversations', methods=['GET'])
+def get_conversations():
+    auth_header = request.headers.get('Authorization', '')
+    id_token = auth_header.split('Bearer ')[-1]
+
+    if not id_token:
+        return jsonify({"error": "Authorization token is missing"}), 401
+
+    uid = verify_firebase_token(id_token)
+    if not uid:
+        return jsonify({"error": "Invalid or expired token"}), 401
+
+    try:
+        conversations_ref = db.reference(f'users/{uid}/conversations')
+        conversations = conversations_ref.get()
+        return jsonify(conversations), 200
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
@@ -136,4 +163,4 @@ def get_ai_response(user_input, conversation_history):
 # Run the Flask app
 if __name__ == '__main__':
     # For development purposes only. Use Gunicorn or another WSGI server in production.
-    app.run(host='0.0.0.0', port=5000, debug=True)
+    app.run(debug=True)
