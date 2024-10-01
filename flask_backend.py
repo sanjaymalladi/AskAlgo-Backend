@@ -29,7 +29,7 @@ def verify_firebase_token(id_token_str):
         request = requests.Request()
         id_info = id_token.verify_oauth2_token(id_token_str, request, audience=None)
         
-        if id_info['iss'] not in ['https://securetoken.google.com/YOUR_PROJECT_ID', 'accounts.google.com']:
+        if id_info['iss'] not in ['https://securetoken.google.com/askalgo-6ed80', 'accounts.google.com']:
             raise ValueError('Wrong issuer.')
         
         # ID token is valid. Get the user's UID from the decoded token.
