@@ -6,14 +6,13 @@ from firebase_admin import credentials, auth as firebase_auth, db
 from uuid import uuid4
 from dotenv import load_dotenv
 
-# Load environment variables from .env file
 load_dotenv()
 
 app = Flask(__name__)
 CORS(app, resources={r"/*": {"origins": "https://askalgo.vercel.app"}})
 
-# Initialize Firebase Admin SDK only if not already initialized
-if not firebase_admin._apps:
+# Initialize Firebase Admin SDK
+def init_firebase():
     try:
         firebase_config = {
             "type": os.getenv("FIREBASE_TYPE"),
@@ -28,20 +27,31 @@ if not firebase_admin._apps:
             "client_x509_cert_url": os.getenv("FIREBASE_CLIENT_X509_CERT_URL"),
             "universe_domain": os.getenv("FIREBASE_UNIVERSE_DOMAIN")
         }
+        
         cred = credentials.Certificate(firebase_config)
         firebase_admin.initialize_app(cred, {
             'databaseURL': os.getenv('FIREBASE_DATABASE_URL')
         })
+        
+        print("Firebase Admin SDK initialized successfully")
     except Exception as e:
         print(f"Failed to initialize Firebase Admin SDK: {str(e)}")
         raise
+
+init_firebase()
 
 def verify_firebase_token(id_token_str):
     try:
         decoded_token = firebase_auth.verify_id_token(id_token_str)
         return decoded_token['uid']
+    except firebase_admin.auth.InvalidIdTokenError:
+        print("Invalid ID token")
+        return None
+    except firebase_admin.auth.ExpiredIdTokenError:
+        print("Expired ID token")
+        return None
     except Exception as e:
-        print(f"Error verifying token: {str(e)}")
+        print(f"Unexpected error during token verification: {str(e)}")
         return None
 
 @app.route('/ask', methods=['POST'])
@@ -105,7 +115,68 @@ def get_ai_response(user_input, conversation_history):
     # For now, we'll return a simple response
     return f"AI response to: {user_input}"
 
-# Keep other routes (signin, register, verify_token, get_conversations) as they are
+# Other routes (signin, register, verify_token, get_conversations)
+@app.route('/signin', methods=['POST'])
+def signin():
+    id_token_str = request.json.get('idToken')
+    uid = verify_firebase_token(id_token_str)
+    
+    if not uid:
+        return jsonify({"error": "Invalid or expired token"}), 401
+    
+    # Additional signin logic can be added here
+    return jsonify({"message": "Signin successful"}), 200
+
+@app.route('/register', methods=['POST'])
+def register():
+    email = request.json.get('email')
+    password = request.json.get('password')
+    
+    try:
+        user = firebase_auth.create_user(email=email, password=password)
+        return jsonify({"message": "User created successfully", "uid": user.uid}), 201
+    except Exception as e:
+        print(f"Error creating user: {str(e)}")
+        return jsonify({"error": "Failed to create user"}), 500
+
+@app.route('/verify_token', methods=['POST'])
+def verify_token():
+    id_token_str = request.json.get('idToken')
+    uid = verify_firebase_token(id_token_str)
+    
+    if not uid:
+        return jsonify({"error": "Invalid or expired token"}), 401
+    
+    return jsonify({"message": "Token verified successfully", "uid": uid}), 200
+
+@app.route('/get_conversations', methods=['GET'])
+def get_conversations():
+    auth_header = request.headers.get('Authorization', '')
+    
+    if not auth_header.startswith('Bearer '):
+        return jsonify({"error": "Invalid Authorization header format"}), 401
+
+    id_token_str = auth_header.split('Bearer ')[-1]
+    
+    if not id_token_str:
+        return jsonify({"error": "Authorization token is missing"}), 401
+
+    uid = verify_firebase_token(id_token_str)
+    
+    if not uid:
+        return jsonify({"error": "Invalid or expired token"}), 401
+
+    try:
+        conversations_ref = db.reference(f'users/{uid}/conversations')
+        conversations_data = conversations_ref.get()
+        
+        if conversations_data is None:
+            return jsonify({"message": "No conversations found"}), 200
+        
+        return jsonify(conversations_data), 200
+    except Exception as e:
+        print(f"Error fetching conversations: {str(e)}")
+        return jsonify({"error": "Failed to fetch conversations"}), 500
 
 if __name__ == '__main__':
     app.run(debug=True)
