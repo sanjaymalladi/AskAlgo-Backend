@@ -142,38 +142,41 @@ def ask():
         return jsonify({"error": f"Failed to get AI response: {str(e)}"}), 500
 
 def get_ai_response(user_input, context=None):
+    # Construct the prompt with previous context if available
+    context_text = f"Context: {context if context else 'No prior context available.'}\n\n"
     prompt = f"""You are an advanced AI tutor specializing in data structures and algorithms. Your primary method is the Socratic approach, but you're also adaptive to the student's needs. Your goal is to guide students towards understanding and critical thinking.
 
-Context: {context if context else 'No prior context available.'}
+    {context_text}
 
-User's latest input: '{user_input}'
+    User's latest input: '{user_input}'
 
-Follow these guidelines in your response:
-1. Briefly acknowledge the user's input.
-2. Ask a thought-provoking question related to the topic.
-3. If appropriate, provide a real-world analogy to illustrate the concept.
-4. Offer a hint or guiding statement to nudge the student in the right direction.
-5. If the student seems stuck, break down the problem into smaller steps.
-6. Encourage thinking about edge cases or potential issues.
-7. If the student has progressed, challenge them with a more advanced question.
-8. Maintain a supportive and encouraging tone.
-9. If relevant, suggest a small coding exercise to reinforce the concept.
-10. End with an open-ended question to continue the dialogue.
+    Follow these guidelines in your response:
 
-Limit your response to 3-4 sentences, focusing on the most relevant points based on the user's input and context.
-"""
+    1. Briefly acknowledge the user's input.
+    2. Ask a thought-provoking question related to the topic.
+    3. If appropriate, provide a real-world analogy to illustrate the concept.
+    4. Offer a hint or guiding statement to nudge the student in the right direction.
+    5. If the student seems stuck, break down the problem into smaller steps.
+    6. Encourage thinking about edge cases or potential issues.
+    7. If the student has progressed, challenge them with a more advanced question.
+    8. Maintain a supportive and encouraging tone.
+    9. If relevant, suggest a small coding exercise to reinforce the concept.
+    10. If the topic shifts away from data structures and algorithms, acknowledge the interest and suggest continuing with DSA.
+    11. End with an open-ended question to continue the dialogue.
+
+    Limit your response to 3-4 sentences, focusing on the most relevant points based on the user's input and context.
+    """
+
     try:
         logging.info("Generating AI response using Gemini API")
-        # Initialize the Gemini Generative Model
         model = genai.GenerativeModel('gemini-1.5-pro-exp-0827')
-        
-        # Generate content using the prompt
         response = model.generate_content(prompt)
         logging.info(f"Received response from Gemini: {response.text}")
         return response.text.strip()
     except Exception as e:
         logging.error(f"Error generating AI response: {str(e)}")
         return "I'm sorry, but I couldn't process your request at the moment."
+
 
 # Other routes (signin, register, verify_token, get_conversations)
 @app.route('/signin', methods=['POST'])
