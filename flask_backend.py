@@ -1,5 +1,5 @@
 import os
-import google.generativeai as genai  # Updated import for Gemini SDK
+import google.generativeai as genai
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 import firebase_admin
@@ -8,9 +8,6 @@ from uuid import uuid4
 from dotenv import load_dotenv
 import logging
 
-# Load environment variables from .env file
-load_dotenv()
-
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 
@@ -18,15 +15,18 @@ logging.basicConfig(level=logging.INFO)
 app = Flask(__name__)
 CORS(app, resources={r"/*": {"origins": "https://askalgo.vercel.app"}})
 
-# Verify GEMINI_API_KEY is set
-gemini_api_key = os.getenv('GEMINI_API_KEY')
+# Load environment variables from .env file for other configurations
+load_dotenv()
+
+# Verify GEMINI_API_KEY is set in environment variables (not .env)
+gemini_api_key = os.environ.get('GEMINI_API_KEY')
 if not gemini_api_key:
-    logging.error("GEMINI_API_KEY is not set. Please check your .env file.")
+    logging.error("GEMINI_API_KEY is not set in the environment variables.")
     raise EnvironmentError("GEMINI_API_KEY is not set.")
 else:
     logging.info("GEMINI_API_KEY is set.")
 
-# Configure Gemini API once at startup
+# Configure Gemini API
 try:
     genai.configure(api_key=gemini_api_key)
     logging.info("Gemini API configured successfully")
@@ -126,7 +126,7 @@ def ask():
         # Extract context from conversation history
         context = "\n".join([f"{msg['role']}: {msg['content']}" for msg in conversation_data["messages"]])
 
-        # Get AI response
+        # Get AI response using Gemini
         ai_response = get_ai_response(question, context)
         
         # Add AI's response to the conversation history
@@ -141,17 +141,16 @@ def ask():
         logging.error(f"Error in /ask endpoint: {str(e)}")
         return jsonify({"error": f"Failed to get AI response: {str(e)}"}), 500
 
-
-def gemini_decides_if_dsa_related(user_input):
-    response = gemini_model.classify(user_input, categories=['DSA', 'Non-DSA'])
+def get_ai_response(question, context):
+    prompt = f"""You are a Socratic method AI tutor. Your job is to ask questions and guide students to learn data structures and algorithms. 
     
-    if response == 'DSA':
-        return True
-    else:
-        return False
+Context of the conversation:
+{context}
 
-def get_ai_response(user_input):
-    prompt = f"You are a Socratic method AI tutor. Your job is to ask questions and guide students to learn data structures and algorithms. User asked: '{user_input}'. Respond with a question or guiding comment."   
+User asked: '{question}'
+
+Respond with a question or guiding comment to help the user learn about data structures and algorithms."""
+
     try:
         logging.info("Generating AI response using Gemini API")
         model = genai.GenerativeModel('gemini-1.5-pro-exp-0827')
@@ -160,11 +159,8 @@ def get_ai_response(user_input):
         return response.text.strip()
     except Exception as e:
         logging.error(f"Error generating AI response: {str(e)}")
-        return "I'm sorry, but I couldn't process your request at the moment."
+        return "I'm sorry, but I couldn't process your request at the moment. Please try again later."
 
-
-
-# Other routes (signin, register, verify_token, get_conversations)
 @app.route('/signin', methods=['POST'])
 def signin():
     id_token_str = request.json.get('idToken')
@@ -174,7 +170,6 @@ def signin():
         logging.warning("Signin failed: Invalid or expired token")
         return jsonify({"error": "Invalid or expired token"}), 401
     
-    # Additional signin logic can be added here
     logging.info(f"User {uid} signed in successfully")
     return jsonify({"message": "Signin successful"}), 200
 
@@ -238,4 +233,5 @@ def get_conversations():
         return jsonify({"error": "Failed to fetch conversations"}), 500
 
 if __name__ == '__main__':
-    app.run(debug=True)
+    port = int(os.environ.get('PORT', 5000))
+    app.run(host='0.0.0.0', port=port)
