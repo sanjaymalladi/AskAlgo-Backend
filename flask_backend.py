@@ -141,20 +141,30 @@ def ask():
         logging.error(f"Error in /ask endpoint: {str(e)}")
         return jsonify({"error": f"Failed to get AI response: {str(e)}"}), 500
 
+
+def gemini_decides_if_dsa_related(user_input):
+    response = gemini_model.classify(user_input, categories=['DSA', 'Non-DSA'])
+    
+    if response == 'DSA':
+        return True
+    else:
+        return False
+
 def get_ai_response(user_input, context=None):
-    # Simulating a call to Gemini to check if the input is DSA related
+    # Use the gemini function to check if the input is DSA related
     is_dsa_related = gemini_decides_if_dsa_related(user_input)
 
     if not is_dsa_related:
         # Respond politely that the system is focused on DSA
-        return f"I understand you're interested in '{user_input}', but as a Socratic-based AI tutor, I'm not equipped to discuss that topic. Please ask about Data Structures and Algorithms (DSA) so I can assist you."
+        return f"I understand you're interested in '{user_input}', but as a DSA tutor, it's out of my expertise domain. Please feel free to ask questions related to Data Structures and Algorithms (DSA) so I can assist you."
 
+    # DSA-related response generation
     prompt = f"""You are an advanced AI tutor specializing exclusively in data structures and algorithms (DSA). Your primary method is the Socratic approach, guiding students towards understanding through questioning and critical thinking. Adapt your approach based on the student's needs and level of understanding, but stay strictly within the DSA domain.
 Context: {context if context else 'No prior context available.'}
 User's latest input: '{user_input}'
 
 Follow these guidelines in your response:
-1. First, determine if the user's input is related to DSA. If it's not, politely tell its out my domian expertise.
+1. First, determine if the user's input is related to DSA. If it's not, politely redirect the conversation back to DSA topics without engaging with the unrelated content.
 2. For DSA-related queries, acknowledge the user's input briefly and assess their current understanding.
 3. Ask a thought-provoking question directly related to the DSA topic at hand. Focus on comparisons, analysis, or problem-solving aspects.
 4. If appropriate, provide a concise real-world analogy to illustrate the DSA concept.
