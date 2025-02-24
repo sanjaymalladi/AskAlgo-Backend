@@ -153,7 +153,7 @@ Respond with a question or guiding comment to help the user learn about data str
 
     try:
         logging.info("Generating AI response using Gemini API")
-        model = genai.GenerativeModel('gemini-1.5-pro-exp-0827')
+        model = genai.GenerativeModel('gemini-pro')
         response = model.generate_content(prompt)
         logging.info(f"Received response from Gemini: {response.text}")
         return response.text.strip()
