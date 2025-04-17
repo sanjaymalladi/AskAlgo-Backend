@@ -1,17 +1,20 @@
 import os
 import logging
 import uvicorn
-from fastapi import FastAPI, HTTPException, Depends, status, Request, Response
+from fastapi import FastAPI, HTTPException, Depends, status, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel, Field
-from typing import Optional, Dict, List, Any, Union
+from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
+from pydantic import BaseModel, EmailStr
+from typing import Optional, List
 from uuid import uuid4
 import google.generativeai as genai
-import firebase_admin
-from firebase_admin import credentials, auth as firebase_auth, db
 from dotenv import load_dotenv
 from functools import lru_cache
+from passlib.context import CryptContext
+from jose import JWTError, jwt
+from datetime import datetime, timedelta
+import json
 
 # Load environment variables
 load_dotenv()
@@ -39,6 +42,20 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# JWT Settings
+SECRET_KEY = os.getenv("JWT_SECRET_KEY", "")
+if not SECRET_KEY:
+    SECRET_KEY = str(uuid4())
+    logger.warning("JWT_SECRET_KEY not set! Using a random key for this session only.")
+ALGORITHM = "HS256"
+ACCESS_TOKEN_EXPIRE_MINUTES = 60 * 24 * 7  # 1 week
+
+# Password hashing
+pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+
+# Token URL for OAuth2
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="token")
+
 # Configure Gemini API
 @lru_cache()
 def get_gemini_api_key():
@@ -64,51 +81,53 @@ def configure_gemini():
 
 configure_gemini()
 
-# Initialize Firebase Admin SDK
-def init_firebase():
+# User database - In a production app, use a real database
+# This is a simple in-memory store for demonstration
+USERS_DB_FILE = "users.json"
+CONVERSATIONS_DB_FILE = "conversations.json"
+
+# Storage functions
+def load_json_file(file_path):
     try:
-        firebase_config = {
-            "type": os.getenv("FIREBASE_TYPE"),
-            "project_id": os.getenv("FIREBASE_PROJECT_ID"),
-            "private_key_id": os.getenv("FIREBASE_PRIVATE_KEY_ID"),
-            "private_key": os.getenv("FIREBASE_PRIVATE_KEY").replace("\\n", "\n"),
-            "client_email": os.getenv("FIREBASE_CLIENT_EMAIL"),
-            "client_id": os.getenv("FIREBASE_CLIENT_ID"),
-            "auth_uri": os.getenv("FIREBASE_AUTH_URI"),
-            "token_uri": os.getenv("FIREBASE_TOKEN_URI"),
-            "auth_provider_x509_cert_url": os.getenv("FIREBASE_AUTH_PROVIDER_X509_CERT_URL"),
-            "client_x509_cert_url": os.getenv("FIREBASE_CLIENT_X509_CERT_URL"),
-            "universe_domain": os.getenv("FIREBASE_UNIVERSE_DOMAIN")
-        }
-        
-        cred = credentials.Certificate(firebase_config)
-        firebase_admin.initialize_app(cred, {
-            'databaseURL': os.getenv('FIREBASE_DATABASE_URL')
-        })
-        
-        logger.info("Firebase Admin SDK initialized successfully")
+        if os.path.exists(file_path):
+            with open(file_path, "r") as f:
+                return json.load(f)
+        return {}
     except Exception as e:
-        logger.error(f"Failed to initialize Firebase Admin SDK: {str(e)}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Firebase initialization error: {str(e)}"
-        )
+        logger.error(f"Error loading file {file_path}: {str(e)}")
+        return {}
 
-# Initialize Firebase only if not already initialized
-if not firebase_admin._apps:
-    init_firebase()
+def save_json_file(file_path, data):
+    try:
+        with open(file_path, "w") as f:
+            json.dump(data, f)
+    except Exception as e:
+        logger.error(f"Error saving file {file_path}: {str(e)}")
 
-# Pydantic Models for request/response validation
+# Load data at startup
+USERS_DB = load_json_file(USERS_DB_FILE)
+CONVERSATIONS_DB = load_json_file(CONVERSATIONS_DB_FILE)
+
+# Pydantic Models
 class Question(BaseModel):
     question: str
     conversationId: Optional[str] = None
 
-class TokenVerification(BaseModel):
-    idToken: str
+class TokenData(BaseModel):
+    email: str
+
+class Token(BaseModel):
+    access_token: str
+    token_type: str
 
 class UserRegistration(BaseModel):
-    email: str
+    email: EmailStr
     password: str
+
+class UserInDB(BaseModel):
+    email: str
+    hashed_password: str
+    user_id: str
 
 class Message(BaseModel):
     role: str
@@ -117,47 +136,55 @@ class Message(BaseModel):
 class Conversation(BaseModel):
     messages: List[Message] = []
 
-# Authentication dependency
-async def get_current_user(request: Request) -> str:
-    auth_header = request.headers.get("Authorization", "")
-    
-    if not auth_header.startswith("Bearer "):
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid Authorization header format",
-        )
+# Authentication functions
+def verify_password(plain_password, hashed_password):
+    return pwd_context.verify(plain_password, hashed_password)
 
-    id_token_str = auth_header.split("Bearer ")[-1]
-    
-    if not id_token_str:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Authorization token is missing",
-        )
+def get_password_hash(password):
+    return pwd_context.hash(password)
 
-    uid = verify_firebase_token(id_token_str)
-    
-    if not uid:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid or expired token",
-        )
-    
-    return uid
+def get_user(email: str):
+    if email in USERS_DB:
+        user_dict = USERS_DB[email]
+        return UserInDB(**user_dict)
+    return None
 
-def verify_firebase_token(id_token_str):
+def authenticate_user(email: str, password: str):
+    user = get_user(email)
+    if not user:
+        return False
+    if not verify_password(password, user.hashed_password):
+        return False
+    return user
+
+def create_access_token(data: dict, expires_delta: Optional[timedelta] = None):
+    to_encode = data.copy()
+    if expires_delta:
+        expire = datetime.utcnow() + expires_delta
+    else:
+        expire = datetime.utcnow() + timedelta(minutes=15)
+    to_encode.update({"exp": expire})
+    encoded_jwt = jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
+    return encoded_jwt
+
+async def get_current_user(token: str = Depends(oauth2_scheme)):
+    credentials_exception = HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="Could not validate credentials",
+        headers={"WWW-Authenticate": "Bearer"},
+    )
     try:
-        decoded_token = firebase_auth.verify_id_token(id_token_str)
-        return decoded_token['uid']
-    except firebase_admin.auth.InvalidIdTokenError:
-        logger.warning("Invalid ID token")
-        return None
-    except firebase_admin.auth.ExpiredIdTokenError:
-        logger.warning("Expired ID token")
-        return None
-    except Exception as e:
-        logger.error(f"Unexpected error during token verification: {str(e)}")
-        return None
+        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+        email: str = payload.get("sub")
+        if email is None:
+            raise credentials_exception
+        token_data = TokenData(email=email)
+    except JWTError:
+        raise credentials_exception
+    user = get_user(token_data.email)
+    if user is None:
+        raise credentials_exception
+    return user
 
 def get_ai_response(question: str, context: str) -> str:
     prompt = f"""You are a Socratic method AI tutor. Your job is to ask questions and guide students to learn data structures and algorithms. 
@@ -173,15 +200,56 @@ Respond with a question or guiding comment to help the user learn about data str
         logger.info("Generating AI response using Gemini API")
         model = genai.GenerativeModel('gemini-pro')
         response = model.generate_content(prompt)
-        logger.info(f"Received response from Gemini: {response.text}")
         return response.text.strip()
     except Exception as e:
         logger.error(f"Error generating AI response: {str(e)}")
         return "I'm sorry, but I couldn't process your request at the moment. Please try again later."
 
 # API Endpoints
+@app.post("/token", response_model=Token)
+async def login_for_access_token(form_data: OAuth2PasswordRequestForm = Depends()):
+    user = authenticate_user(form_data.username, form_data.password)
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Incorrect email or password",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    access_token_expires = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
+    access_token = create_access_token(
+        data={"sub": user.email}, expires_delta=access_token_expires
+    )
+    return {"access_token": access_token, "token_type": "bearer"}
+
+@app.post("/register", status_code=status.HTTP_201_CREATED)
+async def register(user_data: UserRegistration):
+    if user_data.email in USERS_DB:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Email already registered",
+        )
+    
+    try:
+        user_id = str(uuid4())
+        hashed_password = get_password_hash(user_data.password)
+        
+        USERS_DB[user_data.email] = {
+            "email": user_data.email,
+            "hashed_password": hashed_password,
+            "user_id": user_id
+        }
+        save_json_file(USERS_DB_FILE, USERS_DB)
+        
+        return {"message": "User created successfully", "uid": user_id}
+    except Exception as e:
+        logger.error(f"Error creating user: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to create user: {str(e)}",
+        )
+
 @app.post("/ask", status_code=status.HTTP_200_OK)
-async def ask(question_data: Question, user_id: str = Depends(get_current_user)):
+async def ask(question_data: Question, user: UserInDB = Depends(get_current_user)):
     question = question_data.question
     conversation_id = question_data.conversationId
 
@@ -195,33 +263,31 @@ async def ask(question_data: Question, user_id: str = Depends(get_current_user))
     if not conversation_id:
         conversation_id = str(uuid4())
 
-    # Get the reference for the user's conversation
-    conversation_ref = db.reference(f'users/{user_id}/conversations/{conversation_id}')
+    # Initialize user conversations if needed
+    if user.user_id not in CONVERSATIONS_DB:
+        CONVERSATIONS_DB[user.user_id] = {}
+    
+    if conversation_id not in CONVERSATIONS_DB[user.user_id]:
+        CONVERSATIONS_DB[user.user_id][conversation_id] = {"messages": []}
     
     try:
-        # Fetch conversation data
-        conversation_data = conversation_ref.get()
+        conversation_data = CONVERSATIONS_DB[user.user_id][conversation_id]
         
-        # Handle case where no conversation exists yet
-        if conversation_data is None:
-            conversation_data = {"messages": []}
-        
-        # Add the user's question to the conversation history
+        # Add the user's question to the conversation
         conversation_data["messages"].append({"role": "user", "content": question})
 
         # Extract context from conversation history
         context = "\n".join([f"{msg['role']}: {msg['content']}" for msg in conversation_data["messages"]])
 
-        # Get AI response using Gemini
+        # Get AI response
         ai_response = get_ai_response(question, context)
         
-        # Add AI's response to the conversation history
+        # Add AI's response to the conversation
         conversation_data["messages"].append({"role": "ai", "content": ai_response})
 
-        # Save the updated conversation data back to Firebase
-        conversation_ref.set(conversation_data)
+        # Save the updated conversation
+        save_json_file(CONVERSATIONS_DB_FILE, CONVERSATIONS_DB)
 
-        logger.info(f"AI response generated for user {user_id} in conversation {conversation_id}")
         return {"response": ai_response, "conversationId": conversation_id}
     except Exception as e:
         logger.error(f"Error in /ask endpoint: {str(e)}")
@@ -230,63 +296,12 @@ async def ask(question_data: Question, user_id: str = Depends(get_current_user))
             detail=f"Failed to get AI response: {str(e)}",
         )
 
-@app.post("/signin", status_code=status.HTTP_200_OK)
-async def signin(token_data: TokenVerification):
-    uid = verify_firebase_token(token_data.idToken)
-    
-    if not uid:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid or expired token",
-        )
-    
-    logger.info(f"User {uid} signed in successfully")
-    return {"message": "Signin successful"}
-
-@app.post("/register", status_code=status.HTTP_201_CREATED)
-async def register(user_data: UserRegistration):
-    try:
-        user = firebase_auth.create_user(email=user_data.email, password=user_data.password)
-        logger.info(f"User created successfully: {user.uid}")
-        return {"message": "User created successfully", "uid": user.uid}
-    except Exception as e:
-        logger.error(f"Error creating user: {str(e)}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to create user: {str(e)}",
-        )
-
-@app.post("/verify_token", status_code=status.HTTP_200_OK)
-async def verify_token(token_data: TokenVerification):
-    uid = verify_firebase_token(token_data.idToken)
-    
-    if not uid:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid or expired token",
-        )
-    
-    logger.info(f"Token verified successfully for user {uid}")
-    return {"message": "Token verified successfully", "uid": uid}
-
 @app.get("/conversations", status_code=status.HTTP_200_OK)
-async def get_conversations(user_id: str = Depends(get_current_user)):
-    try:
-        conversations_ref = db.reference(f'users/{user_id}/conversations')
-        conversations_data = conversations_ref.get()
-        
-        if conversations_data is None:
-            logger.info(f"No conversations found for user {user_id}")
-            return {"message": "No conversations found"}
-        
-        logger.info(f"Conversations fetched for user {user_id}")
-        return conversations_data
-    except Exception as e:
-        logger.error(f"Error fetching conversations for user {user_id}: {str(e)}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to fetch conversations: {str(e)}",
-        )
+async def get_conversations(user: UserInDB = Depends(get_current_user)):
+    if user.user_id not in CONVERSATIONS_DB:
+        return {"message": "No conversations found"}
+    
+    return CONVERSATIONS_DB[user.user_id]
 
 # Health check endpoint
 @app.get("/health", status_code=status.HTTP_200_OK)

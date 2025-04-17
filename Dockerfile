@@ -20,4 +20,4 @@ ENV LOG_LEVEL=info
 EXPOSE ${PORT}
 
 # Run the application
-CMD exec gunicorn -k uvicorn.workers.UvicornWorker --workers ${WORKERS} --bind 0.0.0.0:${PORT} main:app 
+CMD python main.py 

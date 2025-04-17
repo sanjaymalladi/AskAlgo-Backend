@@ -5,7 +5,8 @@ A FastAPI-based backend for AskAlgo, a Socratic method AI tutor for data structu
 ## Features
 
 - RESTful API with FastAPI
-- Firebase authentication and database integration
+- Simple JWT-based authentication
+- Local JSON file storage for user data and conversations
 - Gemini AI integration for generating responses
 - Conversation history tracking
 - User management
@@ -15,7 +16,7 @@ A FastAPI-based backend for AskAlgo, a Socratic method AI tutor for data structu
 
 - FastAPI - Modern, high-performance web framework
 - Uvicorn - ASGI server implementation
-- Firebase Admin SDK - Authentication and database management
+- JWT - Simple and secure token-based authentication
 - Google Generative AI - Gemini API integration
 - Pydantic - Data validation and settings management
 - Docker - Containerization
@@ -25,7 +26,6 @@ A FastAPI-based backend for AskAlgo, a Socratic method AI tutor for data structu
 ### Prerequisites
 
 - Python 3.8+
-- Firebase project with Realtime Database
 - Gemini API key
 
 ### Installation
@@ -54,19 +54,8 @@ Create a `.env` file in the root directory with:
 # API Keys
 GEMINI_API_KEY=your-gemini-api-key
 
-# Firebase Configuration
-FIREBASE_TYPE=service_account
-FIREBASE_PROJECT_ID=your-firebase-project-id
-FIREBASE_PRIVATE_KEY_ID=your-firebase-private-key-id
-FIREBASE_PRIVATE_KEY=your-firebase-private-key
-FIREBASE_CLIENT_EMAIL=your-firebase-client-email
-FIREBASE_CLIENT_ID=your-firebase-client-id
-FIREBASE_AUTH_URI=https://accounts.google.com/o/oauth2/auth
-FIREBASE_TOKEN_URI=https://oauth2.googleapis.com/token
-FIREBASE_AUTH_PROVIDER_X509_CERT_URL=https://www.googleapis.com/oauth2/v1/certs
-FIREBASE_CLIENT_X509_CERT_URL=your-firebase-client-cert-url
-FIREBASE_UNIVERSE_DOMAIN=googleapis.com
-FIREBASE_DATABASE_URL=https://your-firebase-project-id.firebaseio.com
+# JWT Configuration
+JWT_SECRET_KEY=your-jwt-secret-key
 
 # Frontend URL (for CORS)
 FRONTEND_URL=https://askalgo.vercel.app
@@ -83,10 +72,9 @@ When running the application, FastAPI automatically generates interactive API do
 
 | Endpoint | Method | Description | Authentication Required |
 |----------|--------|-------------|------------------------|
+| `/token` | POST | Login to get access token | No |
 | `/ask` | POST | Ask a question to the AI tutor | Yes |
-| `/signin` | POST | Verify firebase token for signin | No |
 | `/register` | POST | Register a new user | No |
-| `/verify_token` | POST | Verify a firebase token | No |
 | `/conversations` | GET | Get user's conversation history | Yes |
 | `/health` | GET | Health check endpoint | No |
 
